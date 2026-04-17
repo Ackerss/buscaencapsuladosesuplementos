@@ -753,8 +753,10 @@
 .pop-badge { padding: 1px 7px; border-radius: 10px; font-weight: 700; font-size: 0.72rem; }
 .pop-badge-ok    { background: var(--verde-bg); color: var(--verde); }
 .pop-badge-baixo { background: var(--amarelo-bg); color: var(--amarelo); }
+.pop-badge-zero  { background: var(--vermelho-bg, #fee2e2); color: var(--vermelho, #dc2626); }
 .pop-rodape { padding: 8px 12px; font-size: 0.72rem; color: var(--texto-sec); border-top: 1px solid var(--borda); text-align: center; font-style: italic; flex-shrink: 0; }
 .pop-vazio { padding: 20px; text-align: center; color: var(--cinza); font-size: 0.82rem; }
+.pop-card-zero { opacity: 0.55; }
 </style>
 </head>
 <body>
@@ -1793,11 +1795,14 @@ function buscarSimilares(codigoAlvo) {
 }
 
 function renderCardSimilar(s) {
-  const ok = s.minimo > 0 && s.saldo >= s.minimo;
-  const badge = ok
-    ? `<span class="pop-badge pop-badge-ok">${s.saldo}</span>`
-    : `<span class="pop-badge pop-badge-baixo">${s.saldo}</span>`;
-  return `<div class="pop-card">
+  const semEstoque = s.saldo === 0;
+  const ok = !semEstoque && s.minimo > 0 && s.saldo >= s.minimo;
+  const badge = semEstoque
+    ? `<span class="pop-badge pop-badge-zero">${s.saldo}</span>`
+    : ok
+      ? `<span class="pop-badge pop-badge-ok">${s.saldo}</span>`
+      : `<span class="pop-badge pop-badge-baixo">${s.saldo}</span>`;
+  return `<div class="pop-card${semEstoque ? ' pop-card-zero' : ''}">
     <div class="pop-card-nome">${s.nome}</div>
     <div class="pop-card-meta">
       <span class="pop-meta-label">Cód.</span><span class="pop-meta-val">${s.codigo}</span>
@@ -1818,7 +1823,7 @@ function _buscarNaCategoria(grupoAlvo, termosStr, codigoExcluir) {
   return Object.values(dadosEstoqueCompleto).filter(item => {
     if (item.codigo === codigoExcluir) return false;
     if (normGrp(item.grupo) !== normGrp(grupoAlvo)) return false;
-    if (item.saldo < 1) return false;
+    // Sem filtro de saldo: mostra TODOS os itens da categoria, inclusive zerados
     const nomeNorm = String(item.nome || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     return termos.every(t => nomeNorm.includes(t));
   }).sort((a, b) => (b.saldo || 0) - (a.saldo || 0));
@@ -1843,11 +1848,14 @@ function abrirPopoverSimilares(e, codigo) {
       (resto > 0 ? `<div class="pop-rodape">+${resto} outros &mdash; refine a busca</div>` : '');
   };
 
+  const normGrp = g => String(g||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const totalCategoria = Object.values(dadosEstoqueCompleto).filter(it => normGrp(it.grupo) === normGrp(grupoAlvo)).length;
+
   pop.innerHTML = `
     <div class="pop-header">
       <div>
         <div class="pop-titulo">Busca na Categoria</div>
-        <div class="pop-sub">Categoria: <strong>${grupoAlvo}</strong></div>
+        <div class="pop-sub">Categoria: <strong>${grupoAlvo}</strong> — <span style="color:var(--cinza)">${totalCategoria} item${totalCategoria !== 1 ? 's' : ''} carregado${totalCategoria !== 1 ? 's' : ''} no estoque</span></div>
       </div>
       <button class="pop-close" onclick="fecharPopoverSimilares()" title="Fechar (Esc)">&#x2715;</button>
     </div>
