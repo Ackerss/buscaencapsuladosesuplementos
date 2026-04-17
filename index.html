@@ -1482,7 +1482,7 @@ function processarPlanilhas() {
     if (s.includes('data') && s.includes('compra')) ix.data = i;
     if (s.includes('markup') || s.includes('percentual')) ix.markup = i;
     if (s.includes('preco') && s.includes('ultima')) ix.precoUltima = i;
-    if (s.includes('estoque') || s.includes('saldo')) ix.estoque = i;
+    if ((s.includes('estoque') || s.includes('saldo')) && !s.includes('minim') && !s.includes('maxim')) ix.estoque = i;
     if (s.includes('minima') || s.includes('minimo')) ix.minimo = i;
   });
   
