@@ -1077,7 +1077,7 @@
 </div>
 
 <script>
-let dadosEstoque = null, dadosProdutos = null, dadosEstoqueGeral = null;
+let dadosEstoque = null, dadosProdutos = null;
 let dadosConsolidados = [], dadosFiltrados = [];
 let dadosEstoqueCompleto = {};
 let indiceTokens = new Map();
@@ -1383,30 +1383,13 @@ function handleFiles(files) {
       const wb = XLSX.read(e.target.result, { type: 'binary' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const n = file.name.toLowerCase();
-      // Prioridade: nome "geral" ou "completo" = estoque completo para o popup
-      if (n.includes('geral') || n.includes('completo')) {
-        dadosEstoqueGeral = ws;
-        datasArquivos.estoqueGeral = file.lastModified;
-        marcarBadge('badgeEstoqueGeral', file.name);
-      } else if (n.includes('estoque') || n.includes('limite')) {
-        dadosEstoque = ws;
-        datasArquivos.estoque = file.lastModified;
-        marcarBadge('badgeEstoque', file.name);
-      } else if (n.includes('produto')) {
-        dadosProdutos = ws;
-        datasArquivos.produtos = file.lastModified;
-        marcarBadge('badgeProdutos', file.name);
-      } else {
-        // Fallback por conteúdo: detecta pela presença de coluna 'saldo'
+      if (n.includes('estoque') || n.includes('limite')) { dadosEstoque = ws; datasArquivos.estoque = file.lastModified; marcarBadge('badgeEstoque', file.name); }
+      else if (n.includes('produto')) { dadosProdutos = ws; datasArquivos.produtos = file.lastModified; marcarBadge('badgeProdutos', file.name); }
+      else {
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
         const h = (rows[1] || rows[0] || []).map(c => String(c || '').toLowerCase());
-        if (h.some(c => c.includes('saldo'))) {
-          // Tem saldo: é algum tipo de estoque. Se já temos dadosEstoque, é o geral
-          if (!dadosEstoque) { dadosEstoque = ws; datasArquivos.estoque = file.lastModified; marcarBadge('badgeEstoque', file.name); }
-          else { dadosEstoqueGeral = ws; datasArquivos.estoqueGeral = file.lastModified; marcarBadge('badgeEstoqueGeral', file.name); }
-        } else {
-          dadosProdutos = ws; datasArquivos.produtos = file.lastModified; marcarBadge('badgeProdutos', file.name);
-        }
+        if (h.some(c => c.includes('saldo'))) { dadosEstoque = ws; datasArquivos.estoque = file.lastModified; marcarBadge('badgeEstoque', file.name); }
+        else { dadosProdutos = ws; datasArquivos.produtos = file.lastModified; marcarBadge('badgeProdutos', file.name); }
       }
       if (dadosEstoque && dadosProdutos) checkReady();
     };
@@ -1479,46 +1462,6 @@ function processarPlanilhas() {
       maximo: Number(r[ixE.maximo]) || 0
     };
   }
-  dadosEstoqueCompleto = est; // base: planilha de limites
-
-  // Se o usuário também importou o estoque COMPLETO, usar ele para o popup de similares
-  if (dadosEstoqueGeral) {
-    const rG = XLSX.utils.sheet_to_json(dadosEstoqueGeral, { header: 1 });
-    let hG = 5;
-    for (let i = 0; i < Math.min(10, rG.length); i++) {
-      if (rG[i] && rG[i].some(c => {
-        const s = String(c || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        return s.includes('codigo');
-      })) { hG = i; break; }
-    }
-    const colsG = rG[hG] || [];
-    const ixG = { grupo: 0, codigo: 1, nome: 3, saldo: 5, minimo: 8 };
-    colsG.forEach((c, i) => {
-      const s = String(c || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      if (s.includes('grupo')) ixG.grupo = i;
-      if (s === 'codigo' || (s.includes('codigo') && !s.includes('barra'))) ixG.codigo = i;
-      if (s.includes('descricao') || s.includes('produto') || s === 'nome') ixG.nome = i;
-      if (s.includes('saldo')) ixG.saldo = i;
-      if (s.includes('minima') || s.includes('minimo')) ixG.minimo = i;
-    });
-    const estGeral = {};
-    for (let i = hG + 1; i < rG.length; i++) {
-      const r = rG[i];
-      if (!r || r[ixG.codigo] === undefined || r[ixG.codigo] === null || r[ixG.codigo] === '') continue;
-      const cd = String(r[ixG.codigo]).trim();
-      estGeral[cd] = {
-        grupo: String(r[ixG.grupo] || '').trim(),
-        codigo: cd,
-        nome: String(r[ixG.nome] || '').trim(),
-        saldo: Number(r[ixG.saldo]) || 0,
-        // Herdar mínimo da planilha de limites se disponível, senão usar do geral
-        minimo: (est[cd] && est[cd].minimo) || Number(r[ixG.minimo]) || 0
-      };
-    }
-    dadosEstoqueCompleto = estGeral;
-  }
-
-  construirIndiceSimilares();
   const rP = XLSX.utils.sheet_to_json(dadosProdutos, { header: 1 });
   let hP = 1;
   for (let i = 0; i < Math.min(5, rP.length); i++) {
@@ -1531,23 +1474,58 @@ function processarPlanilhas() {
   const ix = {};
   cols.forEach((c, i) => {
     const s = String(c || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (s.includes('grupo')) ix.grupo = i;
     if (s === 'codigo' || (s.includes('codigo') && !s.includes('barra'))) ix.codigo = i;
+    if (s.includes('descricao') || s.includes('produto') || s === 'nome') ix.nome = i;
     if (s === 'custo') ix.custo = i;
     if (s.includes('venda') || s.includes('preco unit')) ix.venda = i;
     if (s.includes('data') && s.includes('compra')) ix.data = i;
     if (s.includes('markup') || s.includes('percentual')) ix.markup = i;
     if (s.includes('preco') && s.includes('ultima')) ix.precoUltima = i;
+    if (s.includes('estoque') || s.includes('saldo')) ix.estoque = i;
+    if (s.includes('minima') || s.includes('minimo')) ix.minimo = i;
   });
+  
   const prod = {};
+  const estTodos = {}; // Usar como base pro popup
+  
   for (let i = hP + 1; i < rP.length; i++) {
     const r = rP[i];
     if (!r || r[ix.codigo] === undefined) continue;
-    prod[String(r[ix.codigo]).trim()] = {
+    const cd = String(r[ix.codigo]).trim();
+    prod[cd] = {
       custo: Number(r[ix.custo]) || 0, venda: Number(r[ix.venda]) || 0,
       markup: parseFloat(r[ix.markup]) || 0,
       dataUltimaCompra: r[ix.data] ? String(r[ix.data]) : '',
       precoUltimaCompra: Number(r[ix.precoUltima]) || 0
     };
+    
+    // Todos os produtos da planilha Produtos
+    estTodos[cd] = {
+      grupo: String(r[ix.grupo] || '').trim(),
+      codigo: cd,
+      nome: String(r[ix.nome] || '').trim(),
+      saldo: Number(r[ix.estoque]) || 0,
+      minimo: Number(r[ix.minimo]) || 0
+    };
+  }
+
+  // Preenche estoqueCompleto (usado no Popup) cruzando com a de Limites (priorizando Limites pra mínimos)
+  dadosEstoqueCompleto = {};
+  Object.keys(estTodos).forEach(cd => {
+    dadosEstoqueCompleto[cd] = {
+      ...estTodos[cd], // código, nome, grupo e saldo original de Produtos
+      // se est do Limite tiver saldo ou mínimo atualizado, sobrescreve
+      saldo: (est[cd] && est[cd].saldo !== undefined) ? est[cd].saldo : estTodos[cd].saldo,
+      minimo: (est[cd] && est[cd].minimo !== undefined) ? est[cd].minimo : estTodos[cd].minimo
+    };
+  });
+  // Adiciona o que só existe na de limites por garantia
+  Object.keys(est).forEach(cd => {
+    if (!dadosEstoqueCompleto[cd]) dadosEstoqueCompleto[cd] = est[cd];
+  });
+
+  construirIndiceSimilares();
   }
 
   dadosConsolidados = Object.values(est).map(e => {
