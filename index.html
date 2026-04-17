@@ -1349,18 +1349,21 @@ function processarPlanilhas() {
   const rE = XLSX.utils.sheet_to_json(dadosEstoque, { header: 1 });
   let hE = 5;
   for (let i = 0; i < Math.min(10, rE.length); i++) {
-    if (rE[i] && rE[i].some(c => String(c || '').toLowerCase().includes('código'))) { hE = i; break; }
+    if (rE[i] && rE[i].some(c => {
+      const s = String(c || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return s.includes('codigo');
+    })) { hE = i; break; }
   }
   const colsE = rE[hE] || [];
   const ixE = { grupo: 0, codigo: 1, nome: 3, saldo: 5, minimo: 8, maximo: 9 };
   colsE.forEach((c, i) => {
-    const s = String(c || '').toLowerCase().trim();
+    const s = String(c || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
     if (s.includes('grupo')) ixE.grupo = i;
-    if (s === 'código' || (s.includes('código') && !s.includes('barras'))) ixE.codigo = i;
-    if (s.includes('descrição') || s.includes('produto') || s === 'nome') ixE.nome = i;
+    if (s === 'codigo' || (s.includes('codigo') && !s.includes('barra'))) ixE.codigo = i;
+    if (s.includes('descricao') || s.includes('produto') || s === 'nome') ixE.nome = i;
     if (s.includes('saldo')) ixE.saldo = i;
-    if (s.includes('mínima') || s.includes('minimo')) ixE.minimo = i;
-    if (s.includes('máxima') || s.includes('maximo')) ixE.maximo = i;
+    if (s.includes('minima') || s.includes('minimo')) ixE.minimo = i;
+    if (s.includes('maxima') || s.includes('maximo')) ixE.maximo = i;
   });
 
   const est = {};
@@ -1380,18 +1383,21 @@ function processarPlanilhas() {
   const rP = XLSX.utils.sheet_to_json(dadosProdutos, { header: 1 });
   let hP = 1;
   for (let i = 0; i < Math.min(5, rP.length); i++) {
-    if (rP[i] && rP[i].some(c => String(c || '').toLowerCase().includes('código'))) { hP = i; break; }
+    if (rP[i] && rP[i].some(c => {
+      const s = String(c || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      return s.includes('codigo');
+    })) { hP = i; break; }
   }
   const cols = rP[hP] || [];
   const ix = {};
   cols.forEach((c, i) => {
-    const s = String(c || '').toLowerCase();
-    if (s === 'código' || (s.includes('código') && !s.includes('barras'))) ix.codigo = i;
+    const s = String(c || '').toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (s === 'codigo' || (s.includes('codigo') && !s.includes('barra'))) ix.codigo = i;
     if (s === 'custo') ix.custo = i;
-    if (s.includes('venda') || s.includes('preço unit')) ix.venda = i;
+    if (s.includes('venda') || s.includes('preco unit')) ix.venda = i;
     if (s.includes('data') && s.includes('compra')) ix.data = i;
     if (s.includes('markup') || s.includes('percentual')) ix.markup = i;
-    if (s.includes('preço') && s.includes('última')) ix.precoUltima = i;
+    if (s.includes('preco') && s.includes('ultima')) ix.precoUltima = i;
   });
   const prod = {};
   for (let i = hP + 1; i < rP.length; i++) {
