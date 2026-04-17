@@ -1689,7 +1689,8 @@ const STOPWORDS_SIMIL = new Set([
   'NOVO','NOVA','ORIGINAL','PREMIUM','LINHA','FAMILIA','FAMILIAR',
   'VEGANO','VEGAN','VEGETAL','VEGETARIANO','VEG','ZERO','LIGHT','DIET',
   'NATURAL','PURO','PURA','TRADICIONAL','IMPORTADO','NACIONAL',
-  'ML','MG','GR','KG','LT'
+  'ML','MG','GR','KG','LT',
+  'NATTUBRAS','NATIVE','NBF','SL','MEDINAL','MAXINUTRI','RN','SHOOPNATU','CATARINENSE','FLORIEN','APIS','NUTRI','MUYBIEN','SUNLIFE','LAIR','NUTRICELL','LAB','LABS','IND','NUTRITION'
 ]);
 const GENERICOS_SIMIL = new Set([
   'VITAMINA','VITAMINAS','VIT',
@@ -1709,12 +1710,24 @@ function tokenizarNome(nome) {
     .replace(/[^A-Z0-9]+/g, ' ')
     .trim();
   if (!norm) return new Set();
-  return new Set(norm.split(/\s+/).filter(t =>
+  
+  let validTokens = norm.split(/\s+/).filter(t =>
     t.length >= 2 &&
     !STOPWORDS_SIMIL.has(t) &&
     !/^\d+$/.test(t) &&
     !/^\d+[A-Z]+$/.test(t)
-  ));
+  );
+
+  // Mata-Sufixo: Se a string validada tiver 3 ou mais palavras, assume-se que a última seja a marca do laboratório
+  if (validTokens.length >= 3) {
+    const ultimo = validTokens[validTokens.length - 1];
+    // Corta se o último for exclusivamente de letras (um ativo químico com número, D3, K2, sobrevive)
+    if (/^[A-Z]+$/.test(ultimo)) {
+      validTokens.pop();
+    }
+  }
+
+  return new Set(validTokens);
 }
 
 function construirIndiceSimilares() {
@@ -1731,7 +1744,10 @@ function construirIndiceSimilares() {
 function buscarSimilares(codigoAlvo) {
   const alvo = dadosEstoqueCompleto[codigoAlvo];
   if (!alvo || !alvo.tokens || alvo.tokens.size === 0) return [];
-  const grupoAlvo = alvo.grupo || '';
+  
+  const normGrp = g => String(g||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const grupoAlvo = normGrp(alvo.grupo);
+  
   const candidatos = new Map();
   alvo.tokens.forEach(tok => {
     const set = indiceTokens.get(tok);
@@ -1741,16 +1757,22 @@ function buscarSimilares(codigoAlvo) {
       candidatos.set(cod, (candidatos.get(cod) || 0) + 1);
     });
   });
+  
   const resultados = [];
   candidatos.forEach((forca, cod) => {
     const item = dadosEstoqueCompleto[cod];
-    if (!item || item.saldo < 1 || (item.grupo || '') !== grupoAlvo) return;
+    // Proteção: Saldo < 1, Nomes 100% iguais (ex: códigos diff), Categorias divergentes normalizadas
+    if (!item || item.saldo < 1 || item.nome === alvo.nome || normGrp(item.grupo) !== grupoAlvo) return;
+    
     const intersec = [];
     item.tokens.forEach(t => { if (alvo.tokens.has(t)) intersec.push(t); });
+    
     const naoGen = intersec.filter(t => !GENERICOS_SIMIL.has(t));
     if (naoGen.length === 0) return;
+    
     resultados.push({ ...item, _forca: forca, _naoGen: naoGen.length });
   });
+  
   resultados.sort((a, b) =>
     b._naoGen !== a._naoGen ? b._naoGen - a._naoGen :
     b._forca  !== a._forca  ? b._forca  - a._forca  :
