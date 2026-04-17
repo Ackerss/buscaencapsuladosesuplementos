@@ -700,7 +700,7 @@
 /* ---- POPOVER SIMILARES ---- */
 #popoverSimilares {
   position: fixed; display: none; z-index: 10000;
-  width: 420px; max-height: 440px;
+  width: 460px; max-height: 500px;
   background: #fff; border: 1px solid var(--borda); border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0,0,0,0.18), 0 0 0 1px rgba(45,106,31,0.08);
   flex-direction: column; overflow: hidden;
@@ -720,15 +720,26 @@
 .pop-close:hover { background: var(--vermelho-bg); color: var(--vermelho); }
 .pop-filtro-wrap { padding: 8px 12px; border-bottom: 1px solid var(--borda); flex-shrink: 0; }
 .pop-filtro {
-  width: 100%; height: 30px; padding: 0 10px;
-  border: 1.5px solid var(--borda); border-radius: 6px;
-  font-size: 0.8rem; background: var(--fundo); outline: none; font-family: var(--sans);
+  width: 100%; height: 32px; padding: 0 10px;
+  border: 1.5px solid var(--verde-claro); border-radius: 6px;
+  font-size: 0.82rem; background: #fff; outline: none; font-family: var(--sans);
+  box-sizing: border-box;
 }
-.pop-filtro:focus { border-color: var(--verde-claro); background: #fff; }
+.pop-filtro:focus { border-color: var(--verde); box-shadow: 0 0 0 3px rgba(45,106,31,0.1); }
+.pop-filtro-hint {
+  margin-top: 5px; font-size: 0.68rem; color: var(--cinza);
+  line-height: 1.4;
+}
+.pop-filtro-hint kbd {
+  display: inline-block; padding: 0 4px; border-radius: 3px;
+  border: 1px solid #cdd0d4; background: #f1f3f5;
+  font-family: var(--mono); font-size: 0.65rem; color: var(--texto-sec);
+}
 .pop-lista { overflow-y: auto; flex: 1; padding: 6px; }
 .pop-card {
   padding: 8px 10px; border-radius: 6px;
   border: 1px solid transparent; transition: background 0.12s, border-color 0.12s;
+  cursor: default;
 }
 .pop-card + .pop-card { margin-top: 2px; }
 .pop-card:hover { background: var(--verde-bg); border-color: #c5dcb7; }
@@ -1597,7 +1608,7 @@ function renderizar() {
           </button>
         </div>
       </td>
-      <td class="col-nome">${d.nome}${(() => { const _n = (indiceTokens.size && dadosEstoqueCompleto[d.codigo]) ? buscarSimilares(d.codigo).length : 0; return _n > 0 ? `<button class="btn-similares" onclick="abrirPopoverSimilares(event,'${cod}')" title="${_n} similar${_n!==1?'es':''} em estoque">📦<span class="btn-similares-badge">${_n}</span></button>` : ''; })()}</td>
+      <td class="col-nome">${d.nome}${(() => { if (!dadosEstoqueCompleto[d.codigo]) return ''; return `<button class="btn-similares" onclick="abrirPopoverSimilares(event,'${cod}')" title="Buscar similares na categoria">📦</button>`; })()}</td>
       <td class="col-estoque">${be}</td>
       <td class="col-minimo col-num hint">${d.minimo}</td>
       <td class="col-num" style="color:var(--verde); font-weight: 700; background-color: rgba(45, 106, 31, 0.05);">${d.comprar > 0 ? d.comprar : '<span class="hint">—</span>'}</td>
@@ -1796,30 +1807,59 @@ function renderCardSimilar(s) {
   </div>`;
 }
 
+function _buscarNaCategoria(grupoAlvo, termosStr, codigoExcluir) {
+  // Divide por '+' para busca multi-termo (ex: 'MELATONINA+GOTAS')
+  const termos = termosStr.trim().toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .split('+')
+    .map(t => t.trim())
+    .filter(Boolean);
+  const normGrp = g => String(g||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  return Object.values(dadosEstoqueCompleto).filter(item => {
+    if (item.codigo === codigoExcluir) return false;
+    if (normGrp(item.grupo) !== normGrp(grupoAlvo)) return false;
+    if (item.saldo < 1) return false;
+    const nomeNorm = String(item.nome || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return termos.every(t => nomeNorm.includes(t));
+  }).sort((a, b) => (b.saldo || 0) - (a.saldo || 0));
+}
+
 function abrirPopoverSimilares(e, codigo) {
   e.stopPropagation();
   fecharPopoverSimilares();
-  const similares = buscarSimilares(codigo);
-  if (!similares.length) return;
   const alvo = dadosEstoqueCompleto[codigo];
-  const LIMITE = 15;
-  const visiveis = similares.slice(0, LIMITE);
-  const ocultos = similares.length - visiveis.length;
+  if (!alvo) return;
+  const grupoAlvo = alvo.grupo || '';
+  // Pré-carrega com os similares automáticos
+  const similares = buscarSimilares(codigo);
+  const LIMITE = 50;
   const pop = document.getElementById('popoverSimilares');
+
+  const renderLista = (itens, q) => {
+    if (!itens.length) return '<div class="pop-vazio">Nenhum resultado na categoria</div>';
+    const vis = itens.slice(0, LIMITE);
+    const resto = itens.length - vis.length;
+    return vis.map(renderCardSimilar).join('') +
+      (resto > 0 ? `<div class="pop-rodape">+${resto} outros &mdash; refine a busca</div>` : '');
+  };
+
   pop.innerHTML = `
     <div class="pop-header">
       <div>
-        <div class="pop-titulo">Similares em estoque</div>
-        <div class="pop-sub">${similares.length} encontrado${similares.length !== 1 ? 's' : ''} &mdash; <strong>${alvo ? alvo.nome : codigo}</strong></div>
+        <div class="pop-titulo">Busca na Categoria</div>
+        <div class="pop-sub">Categoria: <strong>${grupoAlvo}</strong></div>
       </div>
       <button class="pop-close" onclick="fecharPopoverSimilares()" title="Fechar (Esc)">&#x2715;</button>
     </div>
     <div class="pop-filtro-wrap">
-      <input type="text" id="popFiltro" class="pop-filtro" placeholder="Filtrar por termo...">
+      <input type="text" id="popFiltro" class="pop-filtro"
+        placeholder="Ex: melatonina &nbsp;|&nbsp; melatonina+gotas"
+        title="Use + para combinar termos: melatonina+gotas">
+      <div class="pop-filtro-hint">Use <kbd>+</kbd> para múltiplos termos &bull; mostra tudo na categoria com saldo &ge; 1</div>
     </div>
-    <div class="pop-lista" id="popLista">${visiveis.map(renderCardSimilar).join('')}</div>
-    ${ocultos > 0 ? `<div class="pop-rodape">+${ocultos} outros &mdash; refine a busca acima</div>` : ''}
+    <div class="pop-lista" id="popLista">${renderLista(similares, '')}</div>
   `;
+
   const btn = e.currentTarget;
   const r = btn.getBoundingClientRect();
   pop.style.display = 'flex';
@@ -1833,14 +1873,19 @@ function abrirPopoverSimilares(e, codigo) {
   pop.style.top = top + 'px';
   pop.style.left = left + 'px';
   popoverAberto = pop;
-  document.getElementById('popFiltro').addEventListener('input', ev => {
-    const q = ev.target.value.toLowerCase().trim();
-    const filtrados = visiveis.filter(s => s.nome.toLowerCase().includes(q));
-    document.getElementById('popLista').innerHTML = filtrados.length
-      ? filtrados.map(renderCardSimilar).join('')
-      : '<div class="pop-vazio">Nenhum resultado</div>';
+
+  const input = document.getElementById('popFiltro');
+  input.addEventListener('input', ev => {
+    const q = ev.target.value.trim();
+    const itens = q.length >= 2
+      ? _buscarNaCategoria(grupoAlvo, q, codigo)
+      : similares;
+    document.getElementById('popLista').innerHTML = renderLista(itens, q);
   });
-  setTimeout(() => document.addEventListener('mousedown', _clickForaPopover), 0);
+  setTimeout(() => {
+    input.focus();
+    document.addEventListener('mousedown', _clickForaPopover);
+  }, 0);
   document.addEventListener('keydown', _escPopover);
 }
 
