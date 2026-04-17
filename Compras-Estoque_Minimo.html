@@ -744,8 +744,27 @@ let resizeAtivo = false;
 let resolvidosAberto = false;
 
 /* ---- INTEGRAÇÃO API UNIPLUS (via Supabase natubrava-central) ---- */
-const PROXY_URL = 'https://qcxudhpaiqorriclcgyb.supabase.co/functions/v1/uniplus-estoque-proxy';
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFjeHVkaHBhaXFvcnJpY2xjZ3liIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4MTcxMTQsImV4cCI6MjA5MTM5MzExNH0.-B7DbaIXMEz3eqS3HQiH6L1O5NavPC3cyXNYgem7_yk';
+const PROXY_URL = 'https://orjpuzabixvdbacbftyw.supabase.co/functions/v1/uniplus-estoque-proxy';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9yanB1emFiaXh2ZGJhY2JmdHl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM1OTUwNjcsImV4cCI6MjA4OTE3MTA2N30.xkRt_1X35uIzxjAk__G3h0cnUjxDM7gXoWC6mKvnYm8';
+
+// ── Salvar/Carregar mínimos separadamente (persiste entre importações API) ────
+function salvarMinimosLocal() {
+  try {
+    // Extrai só o mapa codigo -> minimo dos dados atuais
+    const mapa = {};
+    dadosConsolidados.forEach(d => { if (d.minimo > 0) mapa[d.codigo] = d.minimo; });
+    if (Object.keys(mapa).length > 0) {
+      localStorage.setItem('NatuBrava_Minimos', JSON.stringify(mapa));
+    }
+  } catch(e) { console.warn('[Mínimos] Erro ao salvar:', e); }
+}
+
+function carregarMinimosLocal() {
+  try {
+    const s = localStorage.getItem('NatuBrava_Minimos');
+    return s ? JSON.parse(s) : {};
+  } catch(e) { return {}; }
+}
 
 async function importarViaAPI() {
   const btn = document.getElementById('btnApiImport');
@@ -763,14 +782,16 @@ async function importarViaAPI() {
   }
 
   try {
-    setProgress(10, 'Conectando ao servidor...');
+    setProgress(10, 'Conectando ao Uniplus...');
 
-    const url = `${PROXY_URL}?action=csv&filtro=abaixo_minimo`;
+    // Busca TODOS os produtos (saldo atual em tempo real)
+    // O filtro abaixo do mínimo é feito localmente após mesclar com mínimos salvos
+    const url = `${PROXY_URL}?action=csv`;
     const res = await fetch(url, {
       headers: { 'Authorization': `Bearer ${SUPABASE_ANON}`, 'apikey': SUPABASE_ANON }
     });
 
-    setProgress(50, 'Recebendo dados...');
+    setProgress(50, 'Recebendo dados do Uniplus...');
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -778,31 +799,62 @@ async function importarViaAPI() {
     }
 
     const data = await res.json();
-
     if (data.error) throw new Error(data.error);
     if (!data.produtos || data.produtos.length === 0) {
-      alert(`Nenhum produto abaixo do mínimo encontrado.\n\nTotal na base: ${data.totalGeral || 0} produtos.`);
+      alert('A API não retornou produtos.\nVerifique as credenciais do Uniplus.');
       return;
     }
 
-    setProgress(80, `Processando ${data.produtos.length} produtos...`);
+    setProgress(75, 'Mesclando com mínimos salvos...');
 
-    // Converter para o mesmo formato que processarPlanilhas() usa
-    dadosConsolidados = data.produtos.map(p => ({
-      grupo: p.grupo || '',
-      codigo: p.codigo,
-      nome: p.nome,
-      saldo: p.saldo || 0,
-      minimo: p.minimo || 0,
-      custo: p.custo || 0,
-      venda: p.venda || 0,
-      markup: p.markup || 0,
-      dataUltimaCompra: p.dataUltimaCompra || '',
+    // ── ESTRATÉGIA HÍBRIDA ────────────────────────────────────────────────────
+    // A API Uniplus retorna saldo ATUAL em tempo real.
+    // O estoque MÍNIMO vem da última planilha manual importada (salvo no localStorage).
+    // Ao importar via API: saldo = API (atualizado) + mínimo = localStorage (memorizado)
+    // Ao importar planilha: atualiza AMBOS e salva mínimos para uso futuro na API.
+    // ─────────────────────────────────────────────────────────────────────────
+    const minimosMemorizados = carregarMinimosLocal();
+    const temMinimos = Object.keys(minimosMemorizados).length > 0;
+
+    // Monta lista completa com saldo atual + mínimo memorizado
+    const todosOsProdutos = data.produtos.map(p => ({
+      grupo:             p.grupo || '',
+      codigo:            String(p.codigo || ''),
+      nome:              p.nome || '',
+      saldo:             typeof p.saldo === 'number' ? p.saldo : (parseFloat(p.saldo) || 0),
+      // Prioridade: mínimo da API (se vier) > mínimo memorizado > 0
+      minimo:            (p.minimo > 0 ? p.minimo : 0) || minimosMemorizados[String(p.codigo || '')] || 0,
+      custo:             p.custo || 0,
+      venda:             p.venda || 0,
+      markup:            p.markup || 0,
+      dataUltimaCompra:  p.dataUltimaCompra || '',
       precoUltimaCompra: p.precoUltimaCompra || 0,
     }));
 
-    // Marcar fonte e timestamp
-    datasArquivos = { estoque: Date.now(), produtos: Date.now(), fonte: '⚡ API ao vivo' };
+    // Filtra: só mostra produtos abaixo do mínimo OU zerados
+    // (mesmo critério da importação manual da planilha estoque_fora_dos_limites)
+    dadosConsolidados = todosOsProdutos.filter(p => {
+      if (p.minimo === 0) return p.saldo === 0;  // sem mínimo: só zerados
+      return p.saldo <= p.minimo;                 // abaixo OU igual ao mínimo
+    });
+
+    if (dadosConsolidados.length === 0) {
+      const msg = temMinimos
+        ? `✅ Nenhum produto abaixo do mínimo!\n\nTotal verificado: ${data.totalGeral || data.produtos.length} produtos.`
+        : `⚠️ API retornou ${data.produtos.length} produtos, mas nenhum mínimo está configurado.\n\nImporte a planilha manual primeiro para registrar os mínimos!`;
+      alert(msg);
+      return;
+    }
+
+    setProgress(90, `Exibindo ${dadosConsolidados.length} produtos abaixo do mínimo...`);
+
+    // Tags de fonte
+    const fonteTag = temMinimos ? '⚡ API + Mínimos salvos' : '⚡ API ao vivo (sem mínimos)';
+    datasArquivos = { estoque: Date.now(), produtos: Date.now(), fonte: fonteTag };
+
+    if (!temMinimos) {
+      console.warn('[API Import] Atenção: nenhum mínimo salvo. Importe a planilha manual pelo menos uma vez.');
+    }
 
     // Popular filtro de grupos
     const grupos = [...new Set(dadosConsolidados.map(d => d.grupo).filter(Boolean))].sort();
@@ -810,7 +862,7 @@ async function importarViaAPI() {
     sel.innerHTML = '<option value="">Todas as categorias</option>';
     grupos.forEach(g => { const op = document.createElement('option'); op.value = g; op.textContent = g; sel.appendChild(op); });
 
-    // Mostrar tabela (mesmo fluxo de processarPlanilhas)
+    // Mostrar tabela
     const drop = document.getElementById('dropZone');
     if (drop) { drop.style.display = 'none'; drop.className = ''; }
     document.getElementById('filtrosBar').style.display = 'flex';
@@ -818,7 +870,7 @@ async function importarViaAPI() {
     document.getElementById('tabelaOuter').style.display = 'block';
     document.getElementById('contadorHeader').style.display = 'block';
 
-    setProgress(100, `✅ ${data.produtos.length} produtos carregados!`);
+    setProgress(100, `✅ ${dadosConsolidados.length} produtos abaixo do mínimo!`);
 
     salvarDadosLocal();
     filtrar();
@@ -1082,6 +1134,8 @@ function processarPlanilhas() {
   document.getElementById('tabelaOuter').style.display = 'block';
   document.getElementById('contadorHeader').style.display = 'block';
   
+  // Salva mínimos separadamente para uso futuro na importação via API
+  salvarMinimosLocal();
   salvarDadosLocal();
   filtrar();
 }
@@ -1097,7 +1151,7 @@ function filtrar() {
     if (txt && !(d.nome.toLowerCase().includes(txt) || d.codigo.includes(txt) || (d.grupo || '').toLowerCase().includes(txt))) return false;
     if (grp && d.grupo !== grp) return false;
     if (est === 'zero' && d.saldo !== 0) return false;
-    if (est === 'baixo' && d.saldo === 0) return false;
+    if (est === 'baixo' && d.saldo > d.minimo) return false; // Mostra zerados E abaixo do mínimo
     return true;
   });
   ordenarDados(); 
