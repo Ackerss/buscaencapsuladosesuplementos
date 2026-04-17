@@ -145,6 +145,7 @@
   col.c-grupo  { width: 116px; }
   col.c-estoque{ width: 86px; }
   col.c-minimo { width: 46px; }
+  col.c-comprar{ width: 78px; }
   col.c-custo  { width: 88px; }
   col.c-venda  { width: 88px; }
   col.c-markup { width: 78px; }
@@ -958,9 +959,9 @@
     <colgroup id="colgroup">
       <col class="c-ok">
       <col class="c-codigo"><col class="c-nome">
-      <col class="c-estoque"><col class="c-minimo"><col class="c-custo">
-      <col class="c-venda"><col class="c-markup"><col class="c-ultr">
-      <col class="c-ultd">
+      <col class="c-estoque"><col class="c-minimo"><col class="c-comprar">
+      <col class="c-custo"><col class="c-venda"><col class="c-markup">
+      <col class="c-ultr"><col class="c-ultd">
     </colgroup>
     <thead>
       <tr>
@@ -969,6 +970,7 @@
         <th onclick="ordenar('nome')">Produto<span class="si">⇅</span></th>
         <th onclick="ordenar('saldo')" class="col-estoque">Estoque<span class="si">⇅</span></th>
         <th class="right col-minimo" onclick="ordenar('minimo')">Mín.<span class="si">⇅</span></th>
+        <th class="right" onclick="ordenar('comprar')">Comprar<span class="si">⇅</span></th>
         <th class="right col-custo" onclick="ordenar('custo')">Custo<span class="si">⇅</span></th>
         <th class="right col-venda" onclick="ordenar('venda')">Venda<span class="si">⇅</span></th>
         <th class="right col-markup" onclick="ordenar('markup')">MK%<span class="si">⇅</span></th>
@@ -1090,6 +1092,7 @@ async function importarViaAPI() {
       nome:              p.nome || '',
       saldo:             typeof p.saldo === 'number' ? p.saldo : (parseFloat(p.saldo) || 0),
       minimo:            (p.minimo > 0 ? p.minimo : 0) || minimosMemorizados[String(p.codigo || '')] || 0,
+      maximo:            p.maximo || 0,
       custo:             p.custo || 0,
       venda:             p.venda || 0,
       markup:            p.markup || 0,
@@ -1098,8 +1101,14 @@ async function importarViaAPI() {
     }));
 
     dadosConsolidados = todosOsProdutos.filter(p => {
-      if (p.minimo === 0) return p.saldo === 0;
+      if (p.minimo === 0) return p.saldo <= 0;
       return p.saldo <= p.minimo;
+    }).map(e => {
+      let comprar = 0;
+      if (e.maximo && e.maximo >= e.minimo) comprar = e.maximo - e.saldo;
+      else comprar = e.minimo - e.saldo;
+      if (comprar < 0) comprar = 0;
+      return { ...e, comprar };
     });
 
     if (dadosConsolidados.length === 0) {
@@ -1341,14 +1350,33 @@ function processarPlanilhas() {
   const rE = XLSX.utils.sheet_to_json(dadosEstoque, { header: 1 });
   let hE = 5;
   for (let i = 0; i < Math.min(10, rE.length); i++) {
-    if (rE[i] && rE[i].some(c => String(c || '').toLowerCase() === 'código')) { hE = i; break; }
+    if (rE[i] && rE[i].some(c => String(c || '').toLowerCase().includes('código'))) { hE = i; break; }
   }
+  const colsE = rE[hE] || [];
+  const ixE = { grupo: 0, codigo: 1, nome: 3, saldo: 5, minimo: 8, maximo: 9 };
+  colsE.forEach((c, i) => {
+    const s = String(c || '').toLowerCase().trim();
+    if (s.includes('grupo')) ixE.grupo = i;
+    if (s === 'código' || (s.includes('código') && !s.includes('barras'))) ixE.codigo = i;
+    if (s.includes('descrição') || s.includes('produto') || s === 'nome') ixE.nome = i;
+    if (s.includes('saldo')) ixE.saldo = i;
+    if (s.includes('mínima') || s.includes('minimo')) ixE.minimo = i;
+    if (s.includes('máxima') || s.includes('maximo')) ixE.maximo = i;
+  });
+
   const est = {};
   for (let i = hE + 1; i < rE.length; i++) {
     const r = rE[i];
-    if (!r || r[1] === undefined || r[1] === null || r[1] === '') continue;
-    const cd = String(r[1]).trim();
-    est[cd] = { grupo: String(r[0] || '').trim(), codigo: cd, nome: String(r[3] || '').trim(), saldo: Number(r[5]) || 0, minimo: Number(r[8]) || 0 };
+    if (!r || r[ixE.codigo] === undefined || r[ixE.codigo] === null || r[ixE.codigo] === '') continue;
+    const cd = String(r[ixE.codigo]).trim();
+    est[cd] = { 
+      grupo: String(r[ixE.grupo] || '').trim(), 
+      codigo: cd, 
+      nome: String(r[ixE.nome] || '').trim(), 
+      saldo: Number(r[ixE.saldo]) || 0, 
+      minimo: Number(r[ixE.minimo]) || 0,
+      maximo: Number(r[ixE.maximo]) || 0
+    };
   }
   const rP = XLSX.utils.sheet_to_json(dadosProdutos, { header: 1 });
   let hP = 1;
@@ -1378,7 +1406,13 @@ function processarPlanilhas() {
     };
   }
 
-  dadosConsolidados = Object.values(est).map(e => ({ ...e, ...(prod[e.codigo] || {}) }));
+  dadosConsolidados = Object.values(est).map(e => {
+      let comprar = 0;
+      if (e.maximo && e.maximo >= e.minimo) comprar = e.maximo - e.saldo;
+      else comprar = e.minimo - e.saldo;
+      if (comprar < 0) comprar = 0;
+    return { ...e, ...(prod[e.codigo] || {}), comprar };
+  });
 
   const grupos = [...new Set(dadosConsolidados.map(d => d.grupo).filter(Boolean))].sort();
   const sel = document.getElementById('filtroGrupo');
@@ -1466,8 +1500,8 @@ function renderizar() {
   const hoje = new Date();
   tbody.innerHTML = dadosFiltrados.map(d => {
     const sel = codigoSelecionado === d.codigo ? ' selecionada' : '';
-    const be = d.saldo === 0
-      ? `<span class="badge-estoque badge-zero">⚠ Zero</span>`
+    const be = d.saldo <= 0
+      ? `<span class="badge-estoque badge-zero">⚠ ${d.saldo===0 ? 'Zero' : d.saldo}</span>`
       : `<span class="badge-estoque badge-baixo">↓ ${d.saldo}</span>`;
     const mkC = d.markup >= 60 ? 'mk-alto' : d.markup >= 35 ? 'mk-medio' : 'mk-baixo';
     const mk = d.markup ? `<span class="markup-pill ${mkC}">${d.markup.toFixed(1)}%</span>` : `<span class="hint">—</span>`;
@@ -1495,6 +1529,7 @@ function renderizar() {
       <td class="col-nome">${d.nome}</td>
       <td class="col-estoque">${be}</td>
       <td class="col-minimo col-num hint">${d.minimo}</td>
+      <td class="col-num" style="color:var(--verde); font-weight: 700; background-color: rgba(45, 106, 31, 0.05);">${d.comprar > 0 ? d.comprar : '<span class="hint">—</span>'}</td>
       <td class="col-custo col-num">${fmt(d.custo)}</td>
       <td class="col-venda col-num">${fmt(d.venda)}</td>
       <td class="col-markup right">${mk}</td>
