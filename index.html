@@ -1105,8 +1105,7 @@ async function importarViaAPI() {
       return p.saldo <= p.minimo;
     }).map(e => {
       let comprar = 0;
-      if (e.maximo && e.maximo >= e.minimo) comprar = e.maximo - e.saldo;
-      else comprar = e.minimo - e.saldo;
+      comprar = e.minimo - e.saldo;
       if (comprar < 0) comprar = 0;
       return { ...e, comprar };
     });
@@ -1408,8 +1407,7 @@ function processarPlanilhas() {
 
   dadosConsolidados = Object.values(est).map(e => {
       let comprar = 0;
-      if (e.maximo && e.maximo >= e.minimo) comprar = e.maximo - e.saldo;
-      else comprar = e.minimo - e.saldo;
+      comprar = e.minimo - e.saldo;
       if (comprar < 0) comprar = 0;
     return { ...e, ...(prod[e.codigo] || {}), comprar };
   });
